@@ -1,4 +1,3 @@
-# agent.py
 
 import json
 # pyrefly: ignore [missing-import]
@@ -130,12 +129,10 @@ class StudentAgent:
 
             messages.append(assistant_message)
 
-            # No tool call means the agent has reached a final answer
             if not assistant_message.get("tool_calls"):
                 print(f"Agent: {assistant_message['content']}")
                 return assistant_message["content"]
 
-            # Process tool calls
             for tool_call in assistant_message["tool_calls"]:
 
                 tool_name = tool_call["function"]["name"]
@@ -144,7 +141,6 @@ class StudentAgent:
                 print(f"Tool call: {tool_name}")
                 print(f"Arguments: {arguments}")
 
-                # Always execute tools through the safety harness
                 result = self.harness.execute(
                     tool_name,
                     arguments
@@ -152,7 +148,6 @@ class StudentAgent:
 
                 print(f"Tool result: {result}")
 
-                # Return the tool result to the agent
                 messages.append(
                     {
                         "role": "tool",
@@ -160,7 +155,6 @@ class StudentAgent:
                     }
                 )
 
-        # Maximum iteration limit reached
         print("Agent stopped: maximum iteration limit reached.")
 
         return (
@@ -173,5 +167,5 @@ if __name__ == "__main__":
     agent = StudentAgent(role="student")
 
     agent.run(
-        "Register student 1001 for Python."
+        "Keep checking my schedule again and again."
     )
