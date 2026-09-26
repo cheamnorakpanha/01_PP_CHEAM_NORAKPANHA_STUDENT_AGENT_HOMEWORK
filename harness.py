@@ -3,6 +3,7 @@ from tools import search_course, check_schedule, register_course
 
 
 MAX_TOOL_CALLS = 5
+MAX_RETRIES = 2
 
 ALLOWED_TOOLS = {
     "search_course",
@@ -46,6 +47,7 @@ class ToolHarness:
         self.role = role
         self.tool_calls = 0
         self.approval_callback = approval_callback
+        self.retry_counts = {}
 
     def execute(self, tool_name: str, arguments: dict):
 
@@ -146,11 +148,35 @@ class ToolHarness:
                 **validated_input.model_dump()
             )
 
+            # Reset retry count after successful execution
+            self.retry_counts[tool_name] = 0
+
             return result
 
         except Exception:
+            retry_count = self.retry_counts.get(tool_name, 0)
+
+            if retry_count < MAX_RETRIES:
+                self.retry_counts[tool_name] = retry_count + 1
+
+                return {
+                    "success": False,
+                    "error_code": "TOOL_EXECUTION_FAILED",
+                    "error": (
+                        "Tool execution failed. "
+                        f"Retry {retry_count + 1}/{MAX_RETRIES} is available."
+                    ),
+                    "retryable": True
+                }
+
+            self.retry_counts[tool_name] = 0
+
             return {
                 "success": False,
-                "error_code": "TOOL_EXECUTION_FAILED",
-                "error": "Tool execution failed."
+                "error_code": "RETRY_LIMIT_REACHED",
+                "error": (
+                    f"Tool '{tool_name}' failed after "
+                    f"{MAX_RETRIES} retries."
+                ),
+                "retryable": False
             }

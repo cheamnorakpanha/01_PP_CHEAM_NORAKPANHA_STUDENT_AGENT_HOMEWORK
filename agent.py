@@ -1,3 +1,4 @@
+from harness import MAX_RETRIES
 from tools import COURSES
 import json
 import re
@@ -306,6 +307,26 @@ class StudentAgent:
             "message",
             "The student was successfully registered."
         )
+
+    def execute_with_retry(self, tool_name, arguments):
+        for attempt in range(MAX_RETRIES + 1):
+            result = self.execute_with_retry(
+                tool_name,
+                arguments
+            )
+
+            if result.get("success"):
+                return result
+
+            if not result.get("retryable"):
+                return result
+
+            print(
+                f"Retrying {tool_name} "
+                f"(attempt {attempt + 2}/{MAX_RETRIES + 1})..."
+            )
+
+        return result
 
     def run(self, user_request):
 
