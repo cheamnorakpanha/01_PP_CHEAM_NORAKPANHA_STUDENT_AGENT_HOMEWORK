@@ -6,7 +6,7 @@ def main():
     print("       SAFE STUDENT ASSISTANT AGENT")
     print("=" * 50)
 
-    role = input("Enter your role (student/admin): ").strip().lower()
+    role = input("\nEnter your role (student/admin): ").strip().lower()
 
     if role not in {"student", "admin"}:
         print("Invalid role. Please use 'student' or 'admin'.")

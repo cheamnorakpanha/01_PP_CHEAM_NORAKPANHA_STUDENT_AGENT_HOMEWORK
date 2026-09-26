@@ -52,6 +52,7 @@ class ToolHarness:
         if tool_name not in ALLOWED_TOOLS:
             return {
                 "success": False,
+                "error_code": "TOOL_NOT_ALLOWED",
                 "error": f"Tool '{tool_name}' is not allowed."
             }
 
@@ -60,12 +61,16 @@ class ToolHarness:
         if risk_level is None:
             return {
                 "success": False,
-                "error": f"Risk level is not defined for tool '{tool_name}'."
+                "error_code": "RISK_NOT_DEFINED",
+                "error": (
+                    f"Risk level is not defined for tool '{tool_name}'."
+                )
             }
 
         if self.tool_calls >= MAX_TOOL_CALLS:
             return {
                 "success": False,
+                "error_code": "TOOL_CALL_LIMIT",
                 "error": "Maximum tool-call limit reached."
             }
 
@@ -74,6 +79,7 @@ class ToolHarness:
         if tool_name not in allowed_tools:
             return {
                 "success": False,
+                "error_code": "PERMISSION_DENIED",
                 "error": (
                     f"Permission denied: role '{self.role}' "
                     f"cannot use '{tool_name}'."
@@ -84,16 +90,32 @@ class ToolHarness:
 
         try:
             validated_input = schema(**arguments)
-        except Exception as error:
+
+        except Exception:
+            if tool_name == "register_course":
+                return {
+                    "success": False,
+                    "error_code": "COURSE_ID_REQUIRED",
+                    "error": (
+                        "A valid numeric course_id is required for "
+                        "registration. If the user provided a course name, "
+                        "call search_course first to find the correct "
+                        "course_id, then call register_course again."
+                    )
+                }
+
             return {
                 "success": False,
-                "error": f"Invalid tool arguments: {error}"
+                "error_code": "INVALID_ARGUMENT",
+                "error": "Invalid tool arguments."
             }
 
         if risk_level == "HIGH":
+
             if self.approval_callback is None:
                 return {
                     "success": False,
+                    "error_code": "APPROVAL_REQUIRED",
                     "error": (
                         f"Human approval required for high-risk tool "
                         f"'{tool_name}'."
@@ -109,7 +131,10 @@ class ToolHarness:
             if not approved:
                 return {
                     "success": False,
-                    "error": f"Human approval denied for '{tool_name}'."
+                    "error_code": "APPROVAL_DENIED",
+                    "error": (
+                        f"Human approval denied for '{tool_name}'."
+                    )
                 }
 
         self.tool_calls += 1
@@ -117,11 +142,15 @@ class ToolHarness:
         tool_function = TOOL_FUNCTIONS[tool_name]
 
         try:
-            result = tool_function(**validated_input.model_dump())
+            result = tool_function(
+                **validated_input.model_dump()
+            )
+
             return result
 
         except Exception:
             return {
                 "success": False,
+                "error_code": "TOOL_EXECUTION_FAILED",
                 "error": "Tool execution failed."
             }

@@ -1,5 +1,7 @@
-
+from tools import COURSES
 import json
+import re
+
 # pyrefly: ignore [missing-import]
 import ollama
 
@@ -50,8 +52,10 @@ TOOLS = [
         "function": {
             "name": "register_course",
             "description": (
-                "Register a student for a course. "
-                "This action requires admin permission."
+                "Register a student for a course using a numeric course_id. "
+                "The course_id must come from search_course. "
+                "Never use a course name as course_id. "
+                "This action requires admin permission and human approval."
             ),
             "parameters": {
                 "type": "object",
@@ -62,7 +66,10 @@ TOOLS = [
                     },
                     "course_id": {
                         "type": "integer",
-                        "description": "The course ID."
+                        "description": (
+                            "The numeric course ID returned by search_course. "
+                            "Do not use the course name here."
+                        )
                     }
                 },
                 "required": ["student_id", "course_id"]
@@ -89,17 +96,233 @@ Rules:
 4. If a tool returns an error, explain the error to the user.
 5. Do not try to bypass permission restrictions.
 6. Give a concise final answer when the task is complete.
+7. Before calling register_course, make sure you have a numeric course_id.
+8. If the user provides a course name instead of a course ID, call search_course first.
+9. Never use a course name as the course_id.
+10. Do not call register_course if the course_id is unknown.
+11. Never claim that a student was registered unless register_course
+    was actually called and returned success: true.
+12. After search_course returns the correct course ID for a registration
+    request, call register_course using that course ID.
+13. For a registration request, do not give a final answer immediately
+    after search_course.
 """
 
 
 class StudentAgent:
-
     def __init__(self, role="student"):
         self.role = role
-        self.harness = ToolHarness(role)
+
+        self.harness = ToolHarness(
+            role,
+            approval_callback=self.request_approval
+        )
+
+    def request_approval(self, tool_name, arguments, risk_level):
+        print("\n" + "=" * 50)
+        print("HUMAN APPROVAL REQUIRED")
+        print("=" * 50)
+
+        if tool_name == "register_course":
+            student_id = arguments["student_id"]
+            course_id = arguments["course_id"]
+
+            course = next(
+                (
+                    course
+                    for course in COURSES
+                    if course["id"] == course_id
+                ),
+                None
+            )
+
+            if course:
+                print(
+                    f"Action: Register student {student_id} "
+                    f"for {course['name']}"
+                )
+            else:
+                print(
+                    f"Action: Register student {student_id} "
+                    f"for course {course_id}"
+                )
+
+            print(f"Risk Level: {risk_level}")
+
+        else:
+            print(f"Action: Execute {tool_name}")
+            print(f"Risk Level: {risk_level}")
+
+        print("=" * 50)
+
+        response = input(
+            "Do you want to approve this action? [y/N]: "
+        ).strip().lower()
+
+        return response == "y"
+
+    def extract_registration_request(self, user_request):
+        """
+        Detect a simple registration request.
+
+        Example:
+        'register student 1001 for Python'
+
+        Returns:
+        {
+            "student_id": 1001,
+            "course_keyword": "Python"
+        }
+
+        or None if the request is not a registration request.
+        """
+
+        pattern = r"register\s+student\s+(\d+)\s+for\s+(.+)"
+
+        match = re.search(
+            pattern,
+            user_request,
+            re.IGNORECASE
+        )
+
+        if not match:
+            return None
+
+        student_id = int(match.group(1))
+        course_keyword = match.group(2).strip()
+
+        return {
+            "student_id": student_id,
+            "course_keyword": course_keyword
+        }
+
+    def handle_registration(self, user_request):
+        """
+        Handle a registration request using a deterministic
+        search -> register workflow.
+
+        Both tools still go through the safety harness.
+        """
+
+        registration = self.extract_registration_request(user_request)
+
+        if registration is None:
+            return None
+
+        if self.role != "admin":
+            result = self.harness.execute(
+                "register_course",
+                {
+                    "student_id": registration["student_id"],
+                    "course_id": 0
+                }
+            )
+
+            print("Tool call: register_course")
+            print(
+                f"Arguments: {registration}"
+            )
+            print(f"Tool result: {result}")
+
+            return (
+                "I could not register the student because "
+                "registration requires admin permission."
+            )
+
+        student_id = registration["student_id"]
+        course_keyword = registration["course_keyword"]
+
+        print("Registration workflow detected.")
+
+        # Step 1: Search for the course
+        print("Tool call: search_course")
+        print(
+            f"Arguments: {{'keyword': '{course_keyword}'}}"
+        )
+
+        search_result = self.harness.execute(
+            "search_course",
+            {
+                "keyword": course_keyword
+            }
+        )
+
+        print(f"Tool result: {search_result}")
+
+        if not search_result.get("success"):
+            return (
+                "I could not find the requested course. "
+                f"{search_result.get('error', '')}"
+            )
+
+        courses = search_result.get("courses", [])
+
+        if not courses:
+            return (
+                f"No course was found for '{course_keyword}'."
+            )
+
+        if len(courses) > 1:
+            return (
+                "Multiple courses were found. "
+                "Please provide a more specific course name."
+            )
+
+        course = courses[0]
+        course_id = course["id"]
+
+        print()
+        print(
+            f"Course found: {course['name']} "
+            f"(ID: {course_id})"
+        )
+
+        # Step 2: Register the student
+        print("Tool call: register_course")
+
+        register_arguments = {
+            "student_id": student_id,
+            "course_id": course_id
+        }
+
+        print(f"Arguments: {register_arguments}")
+
+        register_result = self.harness.execute(
+            "register_course",
+            register_arguments
+        )
+
+        print(f"Tool result: {register_result}")
+
+        if not register_result.get("success"):
+            return (
+                register_result.get(
+                    "error",
+                    "The registration could not be completed."
+                )
+            )
+
+        return register_result.get(
+            "message",
+            "The student was successfully registered."
+        )
 
     def run(self, user_request):
 
+        print(f"\nUser: {user_request}")
+        print(f"Role: {self.role}")
+        print("-" * 50)
+
+        # Handle registration requests with a controlled workflow.
+        registration_result = self.handle_registration(
+            user_request
+        )
+
+        if registration_result is not None:
+            print(f"Agent: {registration_result}")
+            return registration_result
+
+        # Normal LLM agent loop
         messages = [
             {
                 "role": "system",
@@ -111,13 +334,11 @@ class StudentAgent:
             }
         ]
 
-        print(f"\nUser: {user_request}")
-        print(f"Role: {self.role}")
-        print("-" * 50)
-
         for iteration in range(1, MAX_ITERATIONS + 1):
 
-            print(f"Iteration: {iteration}/{MAX_ITERATIONS}")
+            print(
+                f"Iteration: {iteration}/{MAX_ITERATIONS}"
+            )
 
             response = ollama.chat(
                 model=MODEL,
@@ -130,7 +351,9 @@ class StudentAgent:
             messages.append(assistant_message)
 
             if not assistant_message.get("tool_calls"):
-                print(f"Agent: {assistant_message['content']}")
+                print(
+                    f"Agent: {assistant_message['content']}"
+                )
                 return assistant_message["content"]
 
             for tool_call in assistant_message["tool_calls"]:
@@ -155,17 +378,11 @@ class StudentAgent:
                     }
                 )
 
-        print("Agent stopped: maximum iteration limit reached.")
+        print(
+            "Agent stopped: maximum iteration limit reached."
+        )
 
         return (
             "I could not complete the request within "
             "the allowed number of steps."
         )
-
-
-if __name__ == "__main__":
-    agent = StudentAgent(role="student")
-
-    agent.run(
-        "Keep checking my schedule again and again."
-    )
