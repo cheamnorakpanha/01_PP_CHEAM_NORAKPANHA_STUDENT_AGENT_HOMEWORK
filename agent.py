@@ -1,17 +1,15 @@
-from harness import MAX_RETRIES
-from tools import COURSES
 import json
 import re
 
 # pyrefly: ignore [missing-import]
 import ollama
 
-from harness import ToolHarness
-
+from harness import MAX_RETRIES, ToolHarness
+from router import RequestRouter
+from tools import COURSES
 
 MODEL = "llama3.2:latest"
 MAX_ITERATIONS = 5
-
 
 TOOLS = [
     {
@@ -79,7 +77,6 @@ TOOLS = [
     }
 ]
 
-
 SYSTEM_PROMPT = """
 You are a simple Student Assistant Agent.
 
@@ -113,6 +110,7 @@ Rules:
 class StudentAgent:
     def __init__(self, role="student"):
         self.role = role
+        self.router = RequestRouter()
 
         self.harness = ToolHarness(
             role,
@@ -157,7 +155,7 @@ class StudentAgent:
         print("=" * 50)
 
         response = input(
-            "Do you want to approve this action? [y/N]: "
+            "\nDo you want to approve this action? [y/N]: "
         ).strip().lower()
 
         return response == "y"
@@ -197,6 +195,22 @@ class StudentAgent:
             "course_keyword": course_keyword
         }
 
+    def handle_search(self, user_request):
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_request}
+        ]
+
+        return self.run_tool_workflow(messages)
+
+    def handle_schedule(self, user_request):
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_request}
+        ]
+
+        return self.run_tool_workflow(messages)
+
     def handle_registration(self, user_request):
         """
         Handle a registration request using a deterministic
@@ -219,11 +233,9 @@ class StudentAgent:
                 }
             )
 
-            print("Tool call: register_course")
-            print(
-                f"Arguments: {registration}"
-            )
-            print(f"Tool result: {result}")
+            print("Action: register_course")
+            print(f"Arguments: {registration}")
+            print(f"Observation: {result}")
 
             return (
                 "I could not register the student because "
@@ -236,7 +248,7 @@ class StudentAgent:
         print("Registration workflow detected.")
 
         # Step 1: Search for the course
-        print("Tool call: search_course")
+        print("Action: search_course")
         print(
             f"Arguments: {{'keyword': '{course_keyword}'}}"
         )
@@ -248,7 +260,7 @@ class StudentAgent:
             }
         )
 
-        print(f"Tool result: {search_result}")
+        print(f"Observation: {search_result}")
 
         if not search_result.get("success"):
             return (
@@ -279,7 +291,7 @@ class StudentAgent:
         )
 
         # Step 2: Register the student
-        print("Tool call: register_course")
+        print("Action: register_course")
 
         register_arguments = {
             "student_id": student_id,
@@ -293,7 +305,7 @@ class StudentAgent:
             register_arguments
         )
 
-        print(f"Tool result: {register_result}")
+        print(f"Observation: {register_result}")
 
         if not register_result.get("success"):
             return (
@@ -308,9 +320,74 @@ class StudentAgent:
             "The student was successfully registered."
         )
 
+    def handle_routed_request(self, route, user_request):
+        if route == "register":
+            return self.handle_registration(user_request)
+
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_request}
+        ]
+
+        if route == "search":
+            return self.run_tool_workflow(messages)
+
+        if route == "schedule":
+            return self.run_tool_workflow(messages)
+
+        return None
+
+    def run_tool_workflow(self, messages):
+        for iteration in range(1, MAX_ITERATIONS + 1):
+            print(f"\nReAct Step: {iteration}/{MAX_ITERATIONS}")
+
+            response = ollama.chat(
+                model=MODEL,
+                messages=messages,
+                tools=TOOLS
+            )
+
+            assistant_message = response["message"]
+            messages.append(assistant_message)
+
+            # No tool call = final answer
+            if not assistant_message.get("tool_calls"):
+                print("Final Answer:")
+                print(assistant_message["content"])
+                return assistant_message["content"]
+
+            # Tool action
+            for tool_call in assistant_message["tool_calls"]:
+                tool_name = tool_call["function"]["name"]
+                arguments = tool_call["function"]["arguments"]
+
+                print(f"Action: {tool_name}")
+                print(f"Arguments: {arguments}")
+
+                # Execute tool through safety harness
+                result = self.execute_with_retry(
+                    tool_name,
+                    arguments
+                )
+
+                # Tool observation
+                print(f"Observation: {result}")
+
+                messages.append({
+                    "role": "tool",
+                    "content": json.dumps(result)
+                })
+
+        print("Agent stopped: maximum iteration limit reached.")
+
+        return (
+            "I could not complete the request "
+            "within the allowed number of steps."
+        )
+
     def execute_with_retry(self, tool_name, arguments):
         for attempt in range(MAX_RETRIES + 1):
-            result = self.execute_with_retry(
+            result = self.harness.execute(
                 tool_name,
                 arguments
             )
@@ -329,81 +406,28 @@ class StudentAgent:
         return result
 
     def run(self, user_request):
-
         print(f"\nUser: {user_request}")
         print(f"Role: {self.role}")
         print("-" * 50)
 
-        # Handle registration requests with a controlled workflow.
-        registration_result = self.handle_registration(
+        route = self.router.route(user_request)
+
+        print(f"Route: {route}")
+
+        routed_result = self.handle_routed_request(
+            route,
             user_request
         )
 
-        if registration_result is not None:
-            print(f"Agent: {registration_result}")
-            return registration_result
-
-        # Normal LLM agent loop
-        messages = [
-            {
-                "role": "system",
-                "content": SYSTEM_PROMPT
-            },
-            {
-                "role": "user",
-                "content": user_request
-            }
-        ]
-
-        for iteration in range(1, MAX_ITERATIONS + 1):
-
-            print(
-                f"Iteration: {iteration}/{MAX_ITERATIONS}"
-            )
-
-            response = ollama.chat(
-                model=MODEL,
-                messages=messages,
-                tools=TOOLS
-            )
-
-            assistant_message = response["message"]
-
-            messages.append(assistant_message)
-
-            if not assistant_message.get("tool_calls"):
-                print(
-                    f"Agent: {assistant_message['content']}"
-                )
-                return assistant_message["content"]
-
-            for tool_call in assistant_message["tool_calls"]:
-
-                tool_name = tool_call["function"]["name"]
-                arguments = tool_call["function"]["arguments"]
-
-                print(f"Tool call: {tool_name}")
-                print(f"Arguments: {arguments}")
-
-                result = self.harness.execute(
-                    tool_name,
-                    arguments
-                )
-
-                print(f"Tool result: {result}")
-
-                messages.append(
-                    {
-                        "role": "tool",
-                        "content": json.dumps(result)
-                    }
-                )
+        if routed_result is not None:
+            return routed_result
 
         print(
-            "Agent stopped: maximum iteration limit reached."
+            "Agent: I could not determine how to handle "
+            "that request."
         )
 
         return (
-            "I could not complete the request within "
-            "the allowed number of steps."
+            "I could not determine how to handle "
+            "that request."
         )
