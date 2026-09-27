@@ -3,7 +3,7 @@ from agent import StudentAgent
 
 def main():
     print("=" * 50)
-    print("       SAFE STUDENT ASSISTANT AGENT")
+    print("           SAFE STUDENT ASSISTANT AGENT")
     print("=" * 50)
 
     role = input(
@@ -23,7 +23,7 @@ def main():
         return
 
     print("\n" + "=" * 50)
-    print("             AI RESPONSE")
+    print("                  AI RESPONSE")
     print("=" * 50)
 
     agent = StudentAgent(role=role)
