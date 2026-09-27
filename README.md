@@ -62,7 +62,7 @@ admin
 Then enter a request, for example:
 
 ```text
-I want python course
+Find Python Programming
 ```
 
 The agent will:
@@ -366,13 +366,13 @@ These limits help prevent uncontrolled execution loops.
 User request:
 
 ```text
-I want python course
+Find Python Programming
 ```
 
 Agent execution:
 
 ```text
-User: I want python course
+User: Find Python Programming
 Role: student
 --------------------------------------------------
 
