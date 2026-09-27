@@ -1,0 +1,32 @@
+{
+  "courses": [
+    {
+      "id": 1,
+      "name": "Python Programming",
+      "teacher": "Mr. Dara",
+      "schedule": "Monday 6:00 PM - 8:00 PM"
+    },
+    {
+      "id": 2,
+      "name": "Artificial Intelligence",
+      "teacher": "Ms. Sreymao",
+      "schedule": "Tuesday 6:00 PM - 8:00 PM"
+    },
+    {
+      "id": 3,
+      "name": "Data Analytics",
+      "teacher": "Mr. Vannak",
+      "schedule": "Wednesday 6:00 PM - 8:00 PM"
+    },
+    {
+      "id": 4,
+      "name": "Korean Language",
+      "teacher": "Ms. Mina",
+      "schedule": "Friday 6:00 PM - 8:00 PM"
+    }
+  ],
+  "student_schedules": {
+    "1001": [2, 4],
+    "1002": [1, 3]
+  }
+}

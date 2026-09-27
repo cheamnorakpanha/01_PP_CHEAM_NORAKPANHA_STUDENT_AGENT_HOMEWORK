@@ -1,46 +1,49 @@
-COURSES = [
-    {
-        "id": 1,
-        "name": "Python Programming",
-        "teacher": "Mr. Dara",
-        "schedule": "Monday 6:00 PM - 8:00 PM",
-    },
-    {
-        "id": 2,
-        "name": "Artificial Intelligence",
-        "teacher": "Ms. Srey",
-        "schedule": "Tuesday 6:00 PM - 8:00 PM",
-    },
-    {
-        "id": 3,
-        "name": "Data Analytics",
-        "teacher": "Mr. Vannak",
-        "schedule": "Wednesday 6:00 PM - 8:00 PM",
-    },
-    {
-        "id": 4,
-        "name": "Korean Language",
-        "teacher": "Ms. Mina",
-        "schedule": "Friday 6:00 PM - 8:00 PM",
-    },
-]
+import json
+from pathlib import Path
 
 
-STUDENT_SCHEDULES = {
-    1001: [2, 4],
-    1002: [1, 3],
-}
+DATA_FILE = (Path(__file__).parent / "data" / "courses.json")
+
+
+def load_data():
+    try:
+        with open(
+            DATA_FILE,
+            "r",
+            encoding="utf-8"
+        ) as file:
+            data = json.load(file)
+
+        courses = data.get("courses", [])
+
+        student_schedules = {
+            int(student_id): course_ids
+            for student_id, course_ids
+            in data.get("student_schedules", {}).items()
+        }
+
+        return courses, student_schedules
+
+    except (
+        FileNotFoundError,
+        json.JSONDecodeError
+    ) as error:
+        raise RuntimeError(
+            f"Failed to load course data: {error}"
+        )
+
+
+COURSES, STUDENT_SCHEDULES = load_data()
 
 
 def search_course(keyword: str):
-    """Search for courses by name."""
-
     keyword = keyword.strip().lower()
 
+    # Empty keyword means "return all available courses"
     if not keyword:
         return {
-            "success": False,
-            "error": "Search keyword cannot be empty."
+            "success": True,
+            "courses": COURSES
         }
 
     results = [
@@ -56,8 +59,6 @@ def search_course(keyword: str):
 
 
 def check_schedule(student_id: int):
-    """Check the courses registered by a student."""
-
     if student_id <= 0:
         return {
             "success": False,
@@ -69,7 +70,9 @@ def check_schedule(student_id: int):
     if course_ids is None:
         return {
             "success": False,
-            "error": f"Student {student_id} was not found."
+            "error": (
+                f"Student {student_id} was not found."
+            )
         }
 
     courses = [
@@ -85,9 +88,10 @@ def check_schedule(student_id: int):
     }
 
 
-def register_course(student_id: int, course_id: int):
-    """Register a student for a course."""
-
+def register_course(
+    student_id: int,
+    course_id: int
+):
     if student_id <= 0:
         return {
             "success": False,
@@ -103,24 +107,35 @@ def register_course(student_id: int, course_id: int):
     if student_id not in STUDENT_SCHEDULES:
         return {
             "success": False,
-            "error": f"Student {student_id} was not found."
+            "error": (
+                f"Student {student_id} was not found."
+            )
         }
 
     course = next(
-        (course for course in COURSES if course["id"] == course_id),
+        (
+            course
+            for course in COURSES
+            if course["id"] == course_id
+        ),
         None
     )
 
     if course is None:
         return {
             "success": False,
-            "error": f"Course {course_id} was not found."
+            "error": (
+                f"Course {course_id} was not found."
+            )
         }
 
     if course_id in STUDENT_SCHEDULES[student_id]:
         return {
             "success": False,
-            "error": "Student is already registered for this course."
+            "error": (
+                "Student is already registered "
+                "for this course."
+            )
         }
 
     STUDENT_SCHEDULES[student_id].append(course_id)
@@ -128,8 +143,8 @@ def register_course(student_id: int, course_id: int):
     return {
         "success": True,
         "message": (
-            f"Student {student_id} successfully registered "
-            f"for {course['name']}."
+            f"Student {student_id} successfully "
+            f"registered for {course['name']}."
         ),
         "course": course
     }

@@ -1,11 +1,12 @@
-from tools import COURSES
 import json
 import re
 
 # pyrefly: ignore [missing-import]
 import ollama
 
-from harness import ToolHarness
+from harness import MAX_RETRIES, ToolHarness
+from router import RequestRouter
+from tools import COURSES
 
 
 MODEL = "llama3.2:latest"
@@ -17,13 +18,21 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "search_course",
-            "description": "Search for courses by keyword.",
+            "description": (
+                "Search for courses by name or keyword. "
+                "If the user asks for all available courses, "
+                "use an empty keyword to return all courses."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "keyword": {
                         "type": "string",
-                        "description": "Course name or keyword to search for."
+                        "description": (
+                            "Course name or keyword to search for. "
+                            "Use an empty string when the user asks "
+                            "for all available courses."
+                        )
                     }
                 },
                 "required": ["keyword"]
@@ -106,12 +115,17 @@ Rules:
     request, call register_course using that course ID.
 13. For a registration request, do not give a final answer immediately
     after search_course.
+14. If the user asks for all available courses, call search_course
+    with an empty keyword.
+15. When a tool returns an error, accurately explain the error
+    without changing, guessing, or inventing its meaning.
 """
 
 
 class StudentAgent:
     def __init__(self, role="student"):
         self.role = role
+        self.router = RequestRouter()
 
         self.harness = ToolHarness(
             role,
@@ -156,7 +170,7 @@ class StudentAgent:
         print("=" * 50)
 
         response = input(
-            "Do you want to approve this action? [y/N]: "
+            "\nDo you want to approve this action? [y/N]: "
         ).strip().lower()
 
         return response == "y"
@@ -196,6 +210,22 @@ class StudentAgent:
             "course_keyword": course_keyword
         }
 
+    def handle_search(self, user_request):
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_request}
+        ]
+
+        return self.run_tool_workflow(messages)
+
+    def handle_schedule(self, user_request):
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_request}
+        ]
+
+        return self.run_tool_workflow(messages)
+
     def handle_registration(self, user_request):
         """
         Handle a registration request using a deterministic
@@ -218,16 +248,19 @@ class StudentAgent:
                 }
             )
 
-            print("Tool call: register_course")
-            print(
-                f"Arguments: {registration}"
-            )
-            print(f"Tool result: {result}")
+            print("Request Data:")
+            print(registration)
+            print(f"Observation: {result}")
 
-            return (
+            final_answer = (
                 "I could not register the student because "
                 "registration requires admin permission."
             )
+
+            print("Final Answer:")
+            print(final_answer)
+
+            return final_answer
 
         student_id = registration["student_id"]
         course_keyword = registration["course_keyword"]
@@ -235,7 +268,7 @@ class StudentAgent:
         print("Registration workflow detected.")
 
         # Step 1: Search for the course
-        print("Tool call: search_course")
+        print("Action: search_course")
         print(
             f"Arguments: {{'keyword': '{course_keyword}'}}"
         )
@@ -247,26 +280,41 @@ class StudentAgent:
             }
         )
 
-        print(f"Tool result: {search_result}")
+        print(f"Observation: {search_result}")
 
         if not search_result.get("success"):
-            return (
+            final_answer = (
                 "I could not find the requested course. "
                 f"{search_result.get('error', '')}"
             )
 
+            print("Final Answer:")
+            print(final_answer)
+
+            return final_answer
+
         courses = search_result.get("courses", [])
 
         if not courses:
-            return (
+            final_answer = (
                 f"No course was found for '{course_keyword}'."
             )
 
+            print("Final Answer:")
+            print(final_answer)
+
+            return final_answer
+
         if len(courses) > 1:
-            return (
+            final_answer = (
                 "Multiple courses were found. "
                 "Please provide a more specific course name."
             )
+
+            print("Final Answer:")
+            print(final_answer)
+
+            return final_answer
 
         course = courses[0]
         course_id = course["id"]
@@ -278,7 +326,7 @@ class StudentAgent:
         )
 
         # Step 2: Register the student
-        print("Tool call: register_course")
+        print("Action: register_course")
 
         register_arguments = {
             "student_id": student_id,
@@ -292,52 +340,50 @@ class StudentAgent:
             register_arguments
         )
 
-        print(f"Tool result: {register_result}")
+        print(f"Observation: {register_result}")
 
         if not register_result.get("success"):
-            return (
-                register_result.get(
-                    "error",
-                    "The registration could not be completed."
-                )
+            final_answer = register_result.get(
+                "error",
+                "The registration could not be completed."
             )
 
-        return register_result.get(
+            print("Final Answer:")
+            print(final_answer)
+
+            return final_answer
+
+        final_answer = register_result.get(
             "message",
             "The student was successfully registered."
         )
 
-    def run(self, user_request):
+        print("Final Answer:")
+        print(final_answer)
 
-        print(f"\nUser: {user_request}")
-        print(f"Role: {self.role}")
-        print("-" * 50)
+        return final_answer
 
-        # Handle registration requests with a controlled workflow.
-        registration_result = self.handle_registration(
-            user_request
-        )
+    def handle_routed_request(self, route, user_request):
+        if route == "register":
+            return self.handle_registration(user_request)
 
-        if registration_result is not None:
-            print(f"Agent: {registration_result}")
-            return registration_result
-
-        # Normal LLM agent loop
         messages = [
-            {
-                "role": "system",
-                "content": SYSTEM_PROMPT
-            },
-            {
-                "role": "user",
-                "content": user_request
-            }
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_request}
         ]
 
-        for iteration in range(1, MAX_ITERATIONS + 1):
+        if route == "search":
+            return self.run_tool_workflow(messages)
 
+        if route == "schedule":
+            return self.run_tool_workflow(messages)
+
+        return None
+
+    def run_tool_workflow(self, messages):
+        for iteration in range(1, MAX_ITERATIONS + 1):
             print(
-                f"Iteration: {iteration}/{MAX_ITERATIONS}"
+                f"\nReAct Step: {iteration}/{MAX_ITERATIONS}"
             )
 
             response = ollama.chat(
@@ -347,42 +393,89 @@ class StudentAgent:
             )
 
             assistant_message = response["message"]
-
             messages.append(assistant_message)
 
+            # No tool call = final answer
             if not assistant_message.get("tool_calls"):
-                print(
-                    f"Agent: {assistant_message['content']}"
-                )
+                print("Final Answer:")
+                print(assistant_message["content"])
+
                 return assistant_message["content"]
 
+            # Tool action
             for tool_call in assistant_message["tool_calls"]:
-
                 tool_name = tool_call["function"]["name"]
                 arguments = tool_call["function"]["arguments"]
 
-                print(f"Tool call: {tool_name}")
+                print(f"Action: {tool_name}")
                 print(f"Arguments: {arguments}")
 
-                result = self.harness.execute(
+                # Execute tool through safety harness
+                result = self.execute_with_retry(
                     tool_name,
                     arguments
                 )
 
-                print(f"Tool result: {result}")
+                # Tool observation
+                print(f"Observation: {result}")
 
-                messages.append(
-                    {
-                        "role": "tool",
-                        "content": json.dumps(result)
-                    }
-                )
+                messages.append({
+                    "role": "tool",
+                    "content": json.dumps(result)
+                })
 
         print(
             "Agent stopped: maximum iteration limit reached."
         )
 
         return (
-            "I could not complete the request within "
-            "the allowed number of steps."
+            "I could not complete the request "
+            "within the allowed number of steps."
+        )
+
+    def execute_with_retry(self, tool_name, arguments):
+        for attempt in range(MAX_RETRIES + 1):
+            result = self.harness.execute(
+                tool_name,
+                arguments
+            )
+
+            if result.get("success"):
+                return result
+
+            if not result.get("retryable"):
+                return result
+
+            print(
+                f"Retrying {tool_name} "
+                f"(attempt {attempt + 2}/{MAX_RETRIES + 1})..."
+            )
+
+        return result
+
+    def run(self, user_request):
+        print(f"\nUser: {user_request}")
+        print(f"Role: {self.role}")
+        print("-" * 50)
+
+        route = self.router.route(user_request)
+
+        print(f"Route: {route}")
+
+        routed_result = self.handle_routed_request(
+            route,
+            user_request
+        )
+
+        if routed_result is not None:
+            return routed_result
+
+        print(
+            "Agent: I could not determine how to handle "
+            "that request."
+        )
+
+        return (
+            "I could not determine how to handle "
+            "that request."
         )
