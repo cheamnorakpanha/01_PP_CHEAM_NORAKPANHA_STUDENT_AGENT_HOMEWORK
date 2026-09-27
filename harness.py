@@ -1,44 +1,58 @@
-from schemas import SearchCourseInput, CheckScheduleInput, RegisterCourseInput
-from tools import search_course, check_schedule, register_course
+from schemas import (
+    SearchCourseInput,
+    CheckScheduleInput,
+    RegisterCourseInput
+)
+
+from tools import (
+    search_course,
+    check_schedule,
+    register_course
+)
 
 
 MAX_TOOL_CALLS = 5
 MAX_RETRIES = 2
 
+
 ALLOWED_TOOLS = {
     "search_course",
     "check_schedule",
-    "register_course",
+    "register_course"
 }
+
 
 TOOL_RISK_LEVELS = {
     "search_course": "LOW",
     "check_schedule": "LOW",
-    "register_course": "HIGH",
+    "register_course": "HIGH"
 }
+
 
 PERMISSIONS = {
     "student": {
         "search_course",
-        "check_schedule",
+        "check_schedule"
     },
     "admin": {
         "search_course",
         "check_schedule",
-        "register_course",
-    },
+        "register_course"
+    }
 }
+
 
 TOOL_SCHEMAS = {
     "search_course": SearchCourseInput,
     "check_schedule": CheckScheduleInput,
-    "register_course": RegisterCourseInput,
+    "register_course": RegisterCourseInput
 }
+
 
 TOOL_FUNCTIONS = {
     "search_course": search_course,
     "check_schedule": check_schedule,
-    "register_course": register_course,
+    "register_course": register_course
 }
 
 
@@ -50,14 +64,17 @@ class ToolHarness:
         self.retry_counts = {}
 
     def execute(self, tool_name: str, arguments: dict):
-
+        # Tool allowlist
         if tool_name not in ALLOWED_TOOLS:
             return {
                 "success": False,
                 "error_code": "TOOL_NOT_ALLOWED",
-                "error": f"Tool '{tool_name}' is not allowed."
+                "error": (
+                    f"Tool '{tool_name}' is not allowed."
+                )
             }
 
+        # Risk classification check
         risk_level = TOOL_RISK_LEVELS.get(tool_name)
 
         if risk_level is None:
@@ -65,10 +82,12 @@ class ToolHarness:
                 "success": False,
                 "error_code": "RISK_NOT_DEFINED",
                 "error": (
-                    f"Risk level is not defined for tool '{tool_name}'."
+                    f"Risk level is not defined for "
+                    f"tool '{tool_name}'."
                 )
             }
 
+        # Maximum tool-call limit
         if self.tool_calls >= MAX_TOOL_CALLS:
             return {
                 "success": False,
@@ -76,7 +95,11 @@ class ToolHarness:
                 "error": "Maximum tool-call limit reached."
             }
 
-        allowed_tools = PERMISSIONS.get(self.role, set())
+        # Permission check
+        allowed_tools = PERMISSIONS.get(
+            self.role,
+            set()
+        )
 
         if tool_name not in allowed_tools:
             return {
@@ -88,6 +111,7 @@ class ToolHarness:
                 )
             }
 
+        # Input validation
         schema = TOOL_SCHEMAS[tool_name]
 
         try:
@@ -99,10 +123,21 @@ class ToolHarness:
                     "success": False,
                     "error_code": "COURSE_ID_REQUIRED",
                     "error": (
-                        "A valid numeric course_id is required for "
-                        "registration. If the user provided a course name, "
-                        "call search_course first to find the correct "
-                        "course_id, then call register_course again."
+                        "A valid numeric course_id is required "
+                        "for registration. If the user provided "
+                        "a course name, call search_course first "
+                        "to find the correct course_id, then call "
+                        "register_course again."
+                    )
+                }
+
+            if tool_name == "check_schedule":
+                return {
+                    "success": False,
+                    "error_code": "INVALID_STUDENT_ID",
+                    "error": (
+                        "Student ID must be a positive integer, "
+                        "such as 1001 or 1002."
                     )
                 }
 
@@ -112,15 +147,15 @@ class ToolHarness:
                 "error": "Invalid tool arguments."
             }
 
+        # Human-in-the-Loop for HIGH-risk tools
         if risk_level == "HIGH":
-
             if self.approval_callback is None:
                 return {
                     "success": False,
                     "error_code": "APPROVAL_REQUIRED",
                     "error": (
-                        f"Human approval required for high-risk tool "
-                        f"'{tool_name}'."
+                        f"Human approval required for high-risk "
+                        f"tool '{tool_name}'."
                     )
                 }
 
@@ -135,10 +170,12 @@ class ToolHarness:
                     "success": False,
                     "error_code": "APPROVAL_DENIED",
                     "error": (
-                        f"Human approval denied for '{tool_name}'."
+                        f"Human approval denied for "
+                        f"'{tool_name}'."
                     )
                 }
 
+        # Count actual tool execution
         self.tool_calls += 1
 
         tool_function = TOOL_FUNCTIONS[tool_name]
@@ -148,13 +185,15 @@ class ToolHarness:
                 **validated_input.model_dump()
             )
 
-            # Reset retry count after successful execution
             self.retry_counts[tool_name] = 0
 
             return result
 
         except Exception:
-            retry_count = self.retry_counts.get(tool_name, 0)
+            retry_count = self.retry_counts.get(
+                tool_name,
+                0
+            )
 
             if retry_count < MAX_RETRIES:
                 self.retry_counts[tool_name] = retry_count + 1
@@ -164,7 +203,8 @@ class ToolHarness:
                     "error_code": "TOOL_EXECUTION_FAILED",
                     "error": (
                         "Tool execution failed. "
-                        f"Retry {retry_count + 1}/{MAX_RETRIES} is available."
+                        f"Retry {retry_count + 1}/{MAX_RETRIES} "
+                        "is available."
                     ),
                     "retryable": True
                 }

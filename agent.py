@@ -8,21 +8,31 @@ from harness import MAX_RETRIES, ToolHarness
 from router import RequestRouter
 from tools import COURSES
 
+
 MODEL = "llama3.2:latest"
 MAX_ITERATIONS = 5
+
 
 TOOLS = [
     {
         "type": "function",
         "function": {
             "name": "search_course",
-            "description": "Search for courses by keyword.",
+            "description": (
+                "Search for courses by name or keyword. "
+                "If the user asks for all available courses, "
+                "use an empty keyword to return all courses."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "keyword": {
                         "type": "string",
-                        "description": "Course name or keyword to search for."
+                        "description": (
+                            "Course name or keyword to search for. "
+                            "Use an empty string when the user asks "
+                            "for all available courses."
+                        )
                     }
                 },
                 "required": ["keyword"]
@@ -77,6 +87,7 @@ TOOLS = [
     }
 ]
 
+
 SYSTEM_PROMPT = """
 You are a simple Student Assistant Agent.
 
@@ -104,6 +115,10 @@ Rules:
     request, call register_course using that course ID.
 13. For a registration request, do not give a final answer immediately
     after search_course.
+14. If the user asks for all available courses, call search_course
+    with an empty keyword.
+15. When a tool returns an error, accurately explain the error
+    without changing, guessing, or inventing its meaning.
 """
 
 
@@ -233,14 +248,19 @@ class StudentAgent:
                 }
             )
 
-            print("Action: register_course")
-            print(f"Arguments: {registration}")
+            print("Request Data:")
+            print(registration)
             print(f"Observation: {result}")
 
-            return (
+            final_answer = (
                 "I could not register the student because "
                 "registration requires admin permission."
             )
+
+            print("Final Answer:")
+            print(final_answer)
+
+            return final_answer
 
         student_id = registration["student_id"]
         course_keyword = registration["course_keyword"]
@@ -263,23 +283,38 @@ class StudentAgent:
         print(f"Observation: {search_result}")
 
         if not search_result.get("success"):
-            return (
+            final_answer = (
                 "I could not find the requested course. "
                 f"{search_result.get('error', '')}"
             )
 
+            print("Final Answer:")
+            print(final_answer)
+
+            return final_answer
+
         courses = search_result.get("courses", [])
 
         if not courses:
-            return (
+            final_answer = (
                 f"No course was found for '{course_keyword}'."
             )
 
+            print("Final Answer:")
+            print(final_answer)
+
+            return final_answer
+
         if len(courses) > 1:
-            return (
+            final_answer = (
                 "Multiple courses were found. "
                 "Please provide a more specific course name."
             )
+
+            print("Final Answer:")
+            print(final_answer)
+
+            return final_answer
 
         course = courses[0]
         course_id = course["id"]
@@ -308,17 +343,25 @@ class StudentAgent:
         print(f"Observation: {register_result}")
 
         if not register_result.get("success"):
-            return (
-                register_result.get(
-                    "error",
-                    "The registration could not be completed."
-                )
+            final_answer = register_result.get(
+                "error",
+                "The registration could not be completed."
             )
 
-        return register_result.get(
+            print("Final Answer:")
+            print(final_answer)
+
+            return final_answer
+
+        final_answer = register_result.get(
             "message",
             "The student was successfully registered."
         )
+
+        print("Final Answer:")
+        print(final_answer)
+
+        return final_answer
 
     def handle_routed_request(self, route, user_request):
         if route == "register":
@@ -339,7 +382,9 @@ class StudentAgent:
 
     def run_tool_workflow(self, messages):
         for iteration in range(1, MAX_ITERATIONS + 1):
-            print(f"\nReAct Step: {iteration}/{MAX_ITERATIONS}")
+            print(
+                f"\nReAct Step: {iteration}/{MAX_ITERATIONS}"
+            )
 
             response = ollama.chat(
                 model=MODEL,
@@ -354,6 +399,7 @@ class StudentAgent:
             if not assistant_message.get("tool_calls"):
                 print("Final Answer:")
                 print(assistant_message["content"])
+
                 return assistant_message["content"]
 
             # Tool action
@@ -378,7 +424,9 @@ class StudentAgent:
                     "content": json.dumps(result)
                 })
 
-        print("Agent stopped: maximum iteration limit reached.")
+        print(
+            "Agent stopped: maximum iteration limit reached."
+        )
 
         return (
             "I could not complete the request "
